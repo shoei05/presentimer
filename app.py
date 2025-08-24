@@ -351,11 +351,6 @@ st.markdown(f"""
         font-family: 'Courier New', monospace;
         line-height: 0.85;
         letter-spacing: 0.03em;
-    }};
-        text-align: center;
-        margin: 1rem 0;
-        font-family: 'Courier New', monospace;
-        line-height: 0.9;
     }}
 
     .timer-display.overtime {{
