@@ -425,10 +425,10 @@ st.markdown(f"""
     }}
 
     /* Streamlitのデフォルト要素を非表示 */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {visibility: hidden;}
+    #MainMenu {{visibility: hidden;}}
+    footer {{visibility: hidden;}}
+    header {{visibility: hidden;}}
+    .stDeployButton {{visibility: hidden;}}
 
     /* 警告メッセージのスタイル */
     .stAlert {{
