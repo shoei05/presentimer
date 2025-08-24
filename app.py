@@ -342,9 +342,16 @@ st.markdown(f"""
     }}
 
     .timer-display {{
-        font-size: 4rem;
-        font-weight: bold;
+        /* カウントダウンを主役に：大きく＆レスポンシブ */
+        font-size: clamp(6rem, 22vw, 20rem);
+        font-weight: 800;
         color: {text_color};
+        text-align: center;
+        margin: 0.5rem 0;
+        font-family: 'Courier New', monospace;
+        line-height: 0.85;
+        letter-spacing: 0.03em;
+    }};
         text-align: center;
         margin: 1rem 0;
         font-family: 'Courier New', monospace;
