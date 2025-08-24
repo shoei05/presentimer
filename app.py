@@ -444,32 +444,33 @@ st.markdown(f"""
 # メイン表示
 if st.session_state.timer_mode == "presentation":
     # プレゼンタイマーモード
+    # remaining_secondsを計算
     if st.session_state.timer_started and not st.session_state.timer_paused and st.session_state.timer_start_time:
         # タイマーが開始されている場合
         start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
         elapsed_seconds = (now - start_time).total_seconds()
         remaining_seconds = st.session_state.presentation_duration - elapsed_seconds
-        
-        # カウントダウンまたはオーバー時間の表示
-        if remaining_seconds >= 0:
-            # カウントダウン表示
-            minutes = int(remaining_seconds // 60)
-            seconds = int(remaining_seconds % 60)
-            timer_display = f"{minutes:02d}:{seconds:02d}"
-            timer_class = "timer-display"
-        else:
-            # オーバー時間表示
-            over_seconds = abs(remaining_seconds)
-            over_minutes = int(over_seconds // 60)
-            over_secs = int(over_seconds % 60)
-            timer_display = f"+{over_minutes:02d}:{over_secs:02d}"
-            timer_class = "timer-display overtime"
+    elif st.session_state.timer_paused:
+        # 一時停止中
+        remaining_seconds = st.session_state.timer_pause_time
     else:
-        # タイマーが開始されていない場合
+        # タイマーが開始されていない
+        remaining_seconds = st.session_state.presentation_duration
+    
+    # カウントダウンまたはオーバー時間の表示
+    if remaining_seconds >= 0:
+        # カウントダウン表示
         minutes = int(remaining_seconds // 60)
         seconds = int(remaining_seconds % 60)
         timer_display = f"{minutes:02d}:{seconds:02d}"
         timer_class = "timer-display"
+    else:
+        # オーバー時間表示
+        over_seconds = abs(remaining_seconds)
+        over_minutes = int(over_seconds // 60)
+        over_secs = int(over_seconds % 60)
+        timer_display = f"+{over_minutes:02d}:{over_secs:02d}"
+        timer_class = "timer-display overtime"
     
     st.markdown(f"""
     <div class="{timer_class}">
@@ -517,6 +518,16 @@ if st.session_state.timer_mode == "presentation":
     </div>
     """, unsafe_allow_html=True)
     
+    # デバッグ情報（開発時のみ表示）
+    if st.session_state.timer_started and st.session_state.timer_start_time:
+        start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
+        elapsed_seconds = (now - start_time).total_seconds()
+        st.markdown(f"""
+        <div class="time-info" style="font-size: 1rem; opacity: 0.6;">
+            経過時間: {int(elapsed_seconds)}秒 / 設定時間: {st.session_state.presentation_duration}秒
+        </div>
+        """, unsafe_allow_html=True)
+    
     # タイマーコントロール
     st.markdown('<div class="timer-controls">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
@@ -562,8 +573,16 @@ if st.session_state.timer_mode == "presentation":
     with col2:
         if st.button("⏸️ 一時停止", key="pause_timer"):
             if st.session_state.timer_started and not st.session_state.timer_paused:
+                # 現在の残り時間を計算
+                if st.session_state.timer_start_time:
+                    start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
+                    elapsed_seconds = (now - start_time).total_seconds()
+                    current_remaining = max(0, st.session_state.presentation_duration - elapsed_seconds)
+                else:
+                    current_remaining = st.session_state.presentation_duration
+                
                 st.session_state.timer_paused = True
-                st.session_state.timer_pause_time = remaining_seconds
+                st.session_state.timer_pause_time = current_remaining
                 save_settings(
                     st.session_state.target_time, 
                     st.session_state.suffix, 
@@ -574,7 +593,7 @@ if st.session_state.timer_mode == "presentation":
                     True,
                     st.session_state.timer_start_time,
                     True,
-                    remaining_seconds
+                    current_remaining
                 )
                 st.rerun()
     
