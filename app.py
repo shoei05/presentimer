@@ -71,11 +71,13 @@ def parse_time_input(time_str):
 def parse_duration_input(duration_str):
     """
     プレゼン時間の入力フォーマットを解析
-    例: "15", "15:00", "1:30", "90" など
+    例: "15:00", "1500", "1:30", "90", "15" など
 
-    修正点:
-    - コロン形式の「分:秒」で、分は 0 以上の任意の整数を許可（60分以上もOK）
-    - "15" は 15分 (=900秒)、"90" は 90秒 として扱う
+    仕様:
+    - コロン形式の「分:秒」は分と秒をそのまま解釈
+    - コロンがない場合は、末尾2桁を秒、それ以前を分として解釈
+      （例: "1500" -> 15分0秒, "130" -> 1分30秒）
+    - 2桁以下の数字は秒として扱う
     """
     if not duration_str:
         return None
@@ -92,19 +94,28 @@ def parse_duration_input(duration_str):
                 minutes = int(parts[0])  # 上限撤廃
                 seconds = int(parts[1])
                 if minutes >= 0 and 0 <= seconds <= 59:
-                    return minutes * 60 + seconds
+                    total = minutes * 60 + seconds
+                    if total > 0:
+                        return total
             return None
 
         # コロンが含まれていない場合
         else:
-            duration = int(clean_str)
-            if duration <= 0:
+            # 2桁以下は秒として扱う
+            if len(clean_str) <= 2:
+                seconds = int(clean_str)
+                if seconds > 0:
+                    return seconds
                 return None
-            # 60未満の場合は分として扱う
-            if duration < 60:
-                return duration * 60
-            # それ以外は秒として扱う
-            return duration
+
+            # それ以上は末尾2桁を秒、残りを分として扱う
+            minutes = int(clean_str[:-2])
+            seconds = int(clean_str[-2:])
+            if minutes >= 0 and 0 <= seconds <= 59:
+                total = minutes * 60 + seconds
+                if total > 0:
+                    return total
+            return None
 
     except (ValueError, IndexError):
         return None
