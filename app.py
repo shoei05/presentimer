@@ -5,6 +5,7 @@ import pytz
 import json
 import os
 import re
+import unicodedata
 
 # ページ設定
 st.set_page_config(
@@ -26,8 +27,9 @@ def parse_time_input(time_str):
     if not time_str:
         return None
 
-    # 文字列から数字とコロンのみを抽出
-    clean_str = re.sub(r'[^\d:]', '', str(time_str))
+    # 全角などを正規化してから数字とコロンのみを抽出
+    time_str = unicodedata.normalize('NFKC', str(time_str))
+    clean_str = re.sub(r'[^\d:]', '', time_str)
 
     try:
         # コロンが含まれている場合
@@ -78,8 +80,9 @@ def parse_duration_input(duration_str):
     if not duration_str:
         return None
 
-    # 文字列から数字とコロンのみを抽出
-    clean_str = re.sub(r'[^\d:]', '', str(duration_str))
+    # 全角などを正規化してから数字とコロンのみを抽出
+    duration_str = unicodedata.normalize('NFKC', str(duration_str))
+    clean_str = re.sub(r'[^\d:]', '', duration_str)
 
     try:
         # コロンが含まれている場合（分:秒）
