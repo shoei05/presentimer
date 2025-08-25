@@ -357,7 +357,7 @@ st.markdown(f"""
     }}
 
     .timer-display.overtime {{
-        color: #ff4444 !important;
+        color: #ffffff !important;
         animation: pulse 1s infinite;
     }}
 
