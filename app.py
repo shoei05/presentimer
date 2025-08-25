@@ -483,6 +483,12 @@ if st.session_state.timer_mode == "presentation":
     </div>
     """, unsafe_allow_html=True)
 
+    # 進行状況バー
+    total = st.session_state.presentation_duration if st.session_state.presentation_duration > 0 else 1
+    elapsed = total - max(0, remaining_seconds)
+    progress = max(0.0, min(elapsed / total, 1.0))
+    st.progress(progress)
+
     # 現在時刻
     st.markdown(f"""
     <div class="current-time">
@@ -536,8 +542,16 @@ if st.session_state.timer_mode == "presentation":
     st.markdown('<div class="timer-controls">', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
 
+    start_label = "▶️ スタート"
+    start_disabled = False
+    if st.session_state.timer_started:
+        if st.session_state.timer_paused:
+            start_label = "▶️ 再開"
+        else:
+            start_disabled = True
+
     with col1:
-        if st.button("▶️ スタート", key="start_timer"):
+        if st.button(start_label, key="start_timer", disabled=start_disabled):
             if not st.session_state.timer_started:
                 # 新規スタート
                 st.session_state.timer_started = True
@@ -580,8 +594,9 @@ if st.session_state.timer_mode == "presentation":
                 )
                 st.rerun()
 
+    pause_disabled = not st.session_state.timer_started or st.session_state.timer_paused
     with col2:
-        if st.button("⏸️ 一時停止", key="pause_timer"):
+        if st.button("⏸️ 一時停止", key="pause_timer", disabled=pause_disabled):
             if st.session_state.timer_started and not st.session_state.timer_paused:
                 # 現在の残り時間を計算
                 if st.session_state.timer_start_time:
