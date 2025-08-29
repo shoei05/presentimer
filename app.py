@@ -355,6 +355,10 @@ st.markdown(f"""
         line-height: 1;
     }}
 
+    div.stProgress > div > div > div > div {{
+        background-color: #c5487b;
+    }}
+
     .timer-display {{
         /* カウントダウンを主役に：大きく＆レスポンシブ */
         font-size: clamp(6rem, 22vw, 20rem);
