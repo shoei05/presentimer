@@ -19,6 +19,13 @@ st.set_page_config(
 SETTINGS_FILE = "timer_settings.json"
 
 # --- ユーティリティ ---
+def format_time_value(time_obj):
+    """時刻オブジェクトを保存用の HH:MM 文字列へ変換"""
+    if isinstance(time_obj, datetime.time):
+        return time_obj.strftime('%H:%M')
+    return ""
+
+
 def parse_time_input(time_str):
     """
     様々な時刻入力フォーマットを解析
@@ -128,6 +135,13 @@ def load_settings():
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 time_obj = datetime.datetime.strptime(data['time'], '%H:%M').time()
+                end_time_str = data.get('presentation_end_time', '')
+                presentation_end_time = None
+                if end_time_str:
+                    try:
+                        presentation_end_time = datetime.datetime.strptime(end_time_str, '%H:%M').time()
+                    except ValueError:
+                        presentation_end_time = None
                 return (
                     time_obj,
                     data['suffix'],
@@ -139,16 +153,33 @@ def load_settings():
                     data.get('timer_started', False),
                     data.get('timer_start_time', ''),
                     data.get('timer_paused', False),
-                    data.get('timer_pause_time', 0)
+                    data.get('timer_pause_time', 0),
+                    data.get('presentation_setting_mode', 'duration'),
+                    presentation_end_time
                 )
     except Exception:
         pass
-    return datetime.time(23, 59), "から開始", "", False, False, "clock", 900, False, "", False, 0
+    return (
+        datetime.time(23, 59),
+        "から開始",
+        "",
+        False,
+        False,
+        "clock",
+        900,
+        False,
+        "",
+        False,
+        0,
+        "duration",
+        None,
+    )
 
 
 def save_settings(target_time, suffix, color_state=False, force_color=False, timer_mode="clock",
                  presentation_duration=900, timer_started=False, timer_start_time="",
-                 timer_paused=False, timer_pause_time=0):
+                 timer_paused=False, timer_pause_time=0, presentation_setting_mode="duration",
+                 presentation_end_time=None):
     """設定を保存（プレゼンタイマー機能も含む）"""
     try:
         data = {
@@ -162,7 +193,9 @@ def save_settings(target_time, suffix, color_state=False, force_color=False, tim
             'timer_started': bool(timer_started),
             'timer_start_time': timer_start_time,
             'timer_paused': bool(timer_paused),
-            'timer_pause_time': int(timer_pause_time)
+            'timer_pause_time': int(timer_pause_time),
+            'presentation_setting_mode': presentation_setting_mode,
+            'presentation_end_time': format_time_value(presentation_end_time),
         }
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
@@ -174,7 +207,8 @@ def save_settings(target_time, suffix, color_state=False, force_color=False, tim
 # 設定を読み込み
 shared_time, shared_suffix, last_timestamp, shared_color_state, shared_force_color, \
 shared_timer_mode, shared_presentation_duration, shared_timer_started, shared_timer_start_time, \
-shared_timer_paused, shared_timer_pause_time = load_settings()
+shared_timer_paused, shared_timer_pause_time, shared_presentation_setting_mode, \
+shared_presentation_end_time = load_settings()
 
 # セッション状態の初期化
 if 'target_time' not in st.session_state:
@@ -184,11 +218,11 @@ if 'suffix' not in st.session_state:
 if 'last_timestamp' not in st.session_state:
     st.session_state.last_timestamp = last_timestamp
 if 'time_reached' not in st.session_state:
-    st.session_state.time_reached = False
+    st.session_state.time_reached = shared_color_state
 if 'editing' not in st.session_state:
     st.session_state.editing = False
 if 'force_color_change' not in st.session_state:
-    st.session_state.force_color_change = False
+    st.session_state.force_color_change = shared_force_color
 if 'timer_mode' not in st.session_state:
     st.session_state.timer_mode = shared_timer_mode
 if 'presentation_duration' not in st.session_state:
@@ -201,11 +235,16 @@ if 'timer_paused' not in st.session_state:
     st.session_state.timer_paused = shared_timer_paused
 if 'timer_pause_time' not in st.session_state:
     st.session_state.timer_pause_time = shared_timer_pause_time
+if 'presentation_setting_mode' not in st.session_state:
+    st.session_state.presentation_setting_mode = shared_presentation_setting_mode
+if 'presentation_end_time' not in st.session_state:
+    st.session_state.presentation_end_time = shared_presentation_end_time
 
 # 他のユーザーの変更をチェック
 current_time, current_suffix, current_timestamp, current_color_state, current_force_color, \
 current_timer_mode, current_presentation_duration, current_timer_started, current_timer_start_time, \
-current_timer_paused, current_timer_pause_time = load_settings()
+current_timer_paused, current_timer_pause_time, current_presentation_setting_mode, \
+current_presentation_end_time = load_settings()
 
 if current_timestamp != st.session_state.last_timestamp and current_timestamp != "":
     st.session_state.target_time = current_time
@@ -219,56 +258,95 @@ if current_timestamp != st.session_state.last_timestamp and current_timestamp !=
     st.session_state.timer_start_time = current_timer_start_time
     st.session_state.timer_paused = current_timer_paused
     st.session_state.timer_pause_time = current_timer_pause_time
+    st.session_state.presentation_setting_mode = current_presentation_setting_mode
+    st.session_state.presentation_end_time = current_presentation_end_time
 
 # 日本時間の設定
 jst = pytz.timezone('Asia/Tokyo')
 now = datetime.datetime.now(jst)
 
-# --- プレゼンタイマーのロジック（判定のみここで実施）---
-if st.session_state.timer_mode == "presentation":
-    # 残り秒数の計算（ここでは副作用なし）
-    if st.session_state.timer_started and not st.session_state.timer_paused:
-        if st.session_state.timer_start_time:
-            start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
-            elapsed_seconds = (now - start_time).total_seconds()
-            remaining_seconds = st.session_state.presentation_duration - elapsed_seconds
-            # 時間切れの判定
-            if remaining_seconds <= 0 and not st.session_state.time_reached:
-                st.session_state.time_reached = True
-                st.session_state.force_color_change = True
-                save_settings(
-                    st.session_state.target_time,
-                    st.session_state.suffix,
-                    True, True,
-                    st.session_state.timer_mode,
-                    st.session_state.presentation_duration,
-                    st.session_state.timer_started,
-                    st.session_state.timer_start_time,
-                    st.session_state.timer_paused,
-                    st.session_state.timer_pause_time
-                )
-                st.balloons()
-        else:
-            remaining_seconds = st.session_state.presentation_duration
+
+def build_presentation_end_datetime(end_time, current_dt):
+    """終了時刻の time を当日 JST の datetime に変換"""
+    if not isinstance(end_time, datetime.time):
+        return None
+    end_dt = datetime.datetime.combine(current_dt.date(), end_time)
+    return jst.localize(end_dt)
+
+
+def save_current_settings(target_time=None, suffix=None, color_state=None, force_color=None,
+                          timer_mode=None, presentation_duration=None, timer_started=None,
+                          timer_start_time=None, timer_paused=None, timer_pause_time=None,
+                          presentation_setting_mode=None, presentation_end_time=None):
+    """現在のセッション状態をベースに設定を保存"""
+    return save_settings(
+        target_time if target_time is not None else st.session_state.target_time,
+        suffix if suffix is not None else st.session_state.suffix,
+        st.session_state.time_reached if color_state is None else color_state,
+        st.session_state.force_color_change if force_color is None else force_color,
+        st.session_state.timer_mode if timer_mode is None else timer_mode,
+        st.session_state.presentation_duration if presentation_duration is None else presentation_duration,
+        st.session_state.timer_started if timer_started is None else timer_started,
+        st.session_state.timer_start_time if timer_start_time is None else timer_start_time,
+        st.session_state.timer_paused if timer_paused is None else timer_paused,
+        st.session_state.timer_pause_time if timer_pause_time is None else timer_pause_time,
+        st.session_state.presentation_setting_mode
+        if presentation_setting_mode is None else presentation_setting_mode,
+        st.session_state.presentation_end_time if presentation_end_time is None else presentation_end_time,
+    )
+
+
+def get_presentation_snapshot(current_dt):
+    """プレゼンタイマー表示用の残り時間情報を返す"""
+    snapshot = {
+        'setting_mode': st.session_state.presentation_setting_mode,
+        'remaining_seconds': None,
+        'elapsed_seconds': None,
+        'total_seconds': max(1, int(st.session_state.presentation_duration)),
+        'end_dt': None,
+    }
+
+    if st.session_state.presentation_setting_mode == "end_time":
+        snapshot['end_dt'] = build_presentation_end_datetime(
+            st.session_state.presentation_end_time,
+            current_dt,
+        )
+        if st.session_state.timer_started and snapshot['end_dt'] is not None:
+            snapshot['remaining_seconds'] = (snapshot['end_dt'] - current_dt).total_seconds()
+        return snapshot
+
+    if st.session_state.timer_started and not st.session_state.timer_paused and st.session_state.timer_start_time:
+        start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
+        snapshot['elapsed_seconds'] = (current_dt - start_time).total_seconds()
+        snapshot['remaining_seconds'] = st.session_state.presentation_duration - snapshot['elapsed_seconds']
     elif st.session_state.timer_paused:
-        remaining_seconds = st.session_state.timer_pause_time
+        snapshot['remaining_seconds'] = st.session_state.timer_pause_time
     else:
-        # 未開始
-        remaining_seconds = st.session_state.presentation_duration
-        if st.session_state.time_reached:
+        snapshot['remaining_seconds'] = st.session_state.presentation_duration
+    return snapshot
+
+# --- プレゼンタイマーのロジック（判定のみここで実施）---
+presentation_snapshot = None
+if st.session_state.timer_mode == "presentation":
+    presentation_snapshot = get_presentation_snapshot(now)
+    remaining_seconds = presentation_snapshot['remaining_seconds']
+
+    if st.session_state.presentation_setting_mode == "end_time":
+        if remaining_seconds is not None and remaining_seconds <= 0 and not st.session_state.time_reached:
+            st.session_state.time_reached = True
+            st.session_state.force_color_change = True
+            save_current_settings(color_state=True, force_color=True)
+            st.balloons()
+    else:
+        if remaining_seconds <= 0 and not st.session_state.time_reached:
+            st.session_state.time_reached = True
+            st.session_state.force_color_change = True
+            save_current_settings(color_state=True, force_color=True)
+            st.balloons()
+        elif not st.session_state.timer_started and st.session_state.time_reached:
             st.session_state.time_reached = False
             st.session_state.force_color_change = False
-            save_settings(
-                st.session_state.target_time,
-                st.session_state.suffix,
-                False, False,
-                st.session_state.timer_mode,
-                st.session_state.presentation_duration,
-                st.session_state.timer_started,
-                st.session_state.timer_start_time,
-                st.session_state.timer_paused,
-                st.session_state.timer_pause_time
-            )
+            save_current_settings(color_state=False, force_color=False)
 else:
     # 通常の時計モード
     target_dt = datetime.datetime.combine(datetime.date.today(), st.session_state.target_time)
@@ -279,17 +357,7 @@ else:
     if current_time_reached and not st.session_state.time_reached:
         st.session_state.time_reached = True
         st.session_state.force_color_change = True
-        save_settings(
-            st.session_state.target_time,
-            st.session_state.suffix,
-            True, True,
-            st.session_state.timer_mode,
-            st.session_state.presentation_duration,
-            st.session_state.timer_started,
-            st.session_state.timer_start_time,
-            st.session_state.timer_paused,
-            st.session_state.timer_pause_time
-        )
+        save_current_settings(color_state=True, force_color=True)
         st.balloons()
     elif not current_time_reached and not st.session_state.force_color_change:
         st.session_state.time_reached = False
@@ -469,18 +537,21 @@ st.markdown(f"""
 
 # --- メイン表示 ---
 if st.session_state.timer_mode == "presentation":
-    # 残り秒数の再計算（表示用）
-    if st.session_state.timer_started and not st.session_state.timer_paused and st.session_state.timer_start_time:
-        start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
-        elapsed_seconds = (now - start_time).total_seconds()
-        remaining_seconds = st.session_state.presentation_duration - elapsed_seconds
-    elif st.session_state.timer_paused:
-        remaining_seconds = st.session_state.timer_pause_time
-    else:
-        remaining_seconds = st.session_state.presentation_duration
+    remaining_seconds = presentation_snapshot['remaining_seconds']
+    presentation_end_label = format_time_value(st.session_state.presentation_end_time)
+
+    if st.session_state.presentation_setting_mode == "end_time" and presentation_end_label:
+        st.markdown(f"""
+        <div class="target-time">
+            終了時刻 {presentation_end_label}
+        </div>
+        """, unsafe_allow_html=True)
 
     # カウントダウン / オーバー表示
-    if remaining_seconds >= 0:
+    if remaining_seconds is None:
+        timer_display = "--:--"
+        timer_class = "timer-display"
+    elif remaining_seconds >= 0:
         minutes = int(remaining_seconds // 60)
         seconds = int(remaining_seconds % 60)
         timer_display = f"{minutes:02d}:{seconds:02d}"
@@ -499,10 +570,11 @@ if st.session_state.timer_mode == "presentation":
     """, unsafe_allow_html=True)
 
     # 進行状況バー
-    total = st.session_state.presentation_duration if st.session_state.presentation_duration > 0 else 1
-    elapsed = total - max(0, remaining_seconds)
-    progress = max(0.0, min(elapsed / total, 1.0))
-    st.progress(progress)
+    if st.session_state.presentation_setting_mode == "duration":
+        total = presentation_snapshot['total_seconds']
+        elapsed = total - max(0, remaining_seconds)
+        progress = max(0.0, min(elapsed / total, 1.0))
+        st.progress(progress)
 
     # 現在時刻
     st.markdown(f"""
@@ -521,21 +593,27 @@ if st.session_state.timer_mode == "presentation":
     """, unsafe_allow_html=True)
 
     # 状態表示
-    if st.session_state.timer_started:
-        if st.session_state.timer_paused:
-            status_text = "⏸️ 一時停止中"
-        elif st.session_state.timer_start_time:
-            start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
-            elapsed_seconds = (now - start_time).total_seconds()
-            current_remaining = st.session_state.presentation_duration - elapsed_seconds
-            if current_remaining <= 0:
+    if st.session_state.presentation_setting_mode == "end_time":
+        if st.session_state.timer_started and presentation_snapshot['end_dt'] is not None:
+            if remaining_seconds is not None and remaining_seconds <= 0:
                 status_text = "⏰ 時間切れ"
+            else:
+                status_text = "⏳ 終了時刻まで"
+        else:
+            status_text = "⏹️ 停止中"
+    else:
+        if st.session_state.timer_started:
+            if st.session_state.timer_paused:
+                status_text = "⏸️ 一時停止中"
+            elif st.session_state.timer_start_time:
+                if remaining_seconds <= 0:
+                    status_text = "⏰ 時間切れ"
+                else:
+                    status_text = "▶️ プレゼン中"
             else:
                 status_text = "▶️ プレゼン中"
         else:
-            status_text = "▶️ プレゼン中"
-    else:
-        status_text = "⏹️ 停止中"
+            status_text = "⏹️ 停止中"
 
     st.markdown(f"""
     <div class="time-info">
@@ -543,10 +621,25 @@ if st.session_state.timer_mode == "presentation":
     </div>
     """, unsafe_allow_html=True)
 
-    # デバッグ情報（任意）
-    if st.session_state.timer_started and st.session_state.timer_start_time:
-        start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
-        elapsed_seconds = (now - start_time).total_seconds()
+    if st.session_state.presentation_setting_mode == "end_time":
+        if presentation_snapshot['end_dt'] is not None:
+            if st.session_state.timer_started:
+                detail_text = (
+                    f"現在時刻: {now.strftime('%H:%M:%S')} / "
+                    f"終了時刻: {presentation_end_label}"
+                )
+            else:
+                detail_text = (
+                    f"終了時刻: {presentation_end_label} / "
+                    "停止中（設定で再度確定すると開始）"
+                )
+            st.markdown(f"""
+            <div class="time-info" style="font-size: 1rem; opacity: 0.6;">
+                {detail_text}
+            </div>
+            """, unsafe_allow_html=True)
+    elif st.session_state.timer_started and st.session_state.timer_start_time:
+        elapsed_seconds = presentation_snapshot['elapsed_seconds'] or 0
         st.markdown(f"""
         <div class="time-info" style="font-size: 1rem; opacity: 0.6;">
             経過時間: {int(elapsed_seconds)}秒 / 設定時間: {int(st.session_state.presentation_duration)}秒
@@ -555,110 +648,100 @@ if st.session_state.timer_mode == "presentation":
 
     # タイマーコントロール
     st.markdown('<div class="timer-controls">', unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-
-    start_label = "▶️ スタート"
-    start_disabled = False
-    if st.session_state.timer_started:
-        if st.session_state.timer_paused:
-            start_label = "▶️ 再開"
-        else:
-            start_disabled = True
-
-    with col1:
-        if st.button(start_label, key="start_timer", disabled=start_disabled):
-            if not st.session_state.timer_started:
-                # 新規スタート
-                st.session_state.timer_started = True
-                st.session_state.timer_start_time = now.isoformat()
-                st.session_state.timer_paused = False
-                st.session_state.timer_pause_time = 0
-                st.session_state.time_reached = False
-                st.session_state.force_color_change = False
-                save_settings(
-                    st.session_state.target_time,
-                    st.session_state.suffix,
-                    False,
-                    False,
-                    st.session_state.timer_mode,
-                    st.session_state.presentation_duration,
-                    True,
-                    st.session_state.timer_start_time,
-                    False,
-                    0
-                )
-                st.rerun()
-            elif st.session_state.timer_paused:
-                # 一時停止からの再開：残り時間でリスタートする
-                remaining = max(0, int(st.session_state.timer_pause_time))
-                st.session_state.presentation_duration = remaining
-                st.session_state.timer_paused = False
-                st.session_state.timer_pause_time = 0
-                st.session_state.timer_start_time = now.isoformat()
-                save_settings(
-                    st.session_state.target_time,
-                    st.session_state.suffix,
-                    st.session_state.time_reached,
-                    st.session_state.force_color_change,
-                    st.session_state.timer_mode,
-                    remaining,
-                    True,
-                    st.session_state.timer_start_time,
-                    False,
-                    0
-                )
-                st.rerun()
-
-    pause_disabled = not st.session_state.timer_started or st.session_state.timer_paused
-    with col2:
-        if st.button("⏸️ 一時停止", key="pause_timer", disabled=pause_disabled):
-            if st.session_state.timer_started and not st.session_state.timer_paused:
-                # 現在の残り時間を計算
-                if st.session_state.timer_start_time:
-                    start_time = datetime.datetime.fromisoformat(st.session_state.timer_start_time)
-                    elapsed_seconds = (now - start_time).total_seconds()
-                    current_remaining = max(0, st.session_state.presentation_duration - elapsed_seconds)
-                else:
-                    current_remaining = st.session_state.presentation_duration
-
-                st.session_state.timer_paused = True
-                st.session_state.timer_pause_time = int(current_remaining)
-                save_settings(
-                    st.session_state.target_time,
-                    st.session_state.suffix,
-                    st.session_state.time_reached,
-                    st.session_state.force_color_change,
-                    st.session_state.timer_mode,
-                    st.session_state.presentation_duration,
-                    True,
-                    st.session_state.timer_start_time,
-                    True,
-                    st.session_state.timer_pause_time
-                )
-                st.rerun()
-
-    with col3:
-        if st.button("⏹️ リセット", key="reset_timer"):
+    if st.session_state.presentation_setting_mode == "end_time":
+        if st.button("⏹️ リセット", key="reset_end_time_timer"):
             st.session_state.timer_started = False
             st.session_state.timer_start_time = ""
             st.session_state.timer_paused = False
             st.session_state.timer_pause_time = 0
             st.session_state.time_reached = False
             st.session_state.force_color_change = False
-            # リセットしても設定したプレゼン時間自体は維持
-            save_settings(
-                st.session_state.target_time,
-                st.session_state.suffix,
-                False,
-                False,
-                st.session_state.timer_mode,
-                st.session_state.presentation_duration,
-                False,
-                "",
-                False,
-                0
+            save_current_settings(
+                color_state=False,
+                force_color=False,
+                timer_started=False,
+                timer_start_time="",
+                timer_paused=False,
+                timer_pause_time=0,
             )
             st.rerun()
+    else:
+        col1, col2, col3 = st.columns(3)
+
+        start_label = "▶️ スタート"
+        start_disabled = False
+        if st.session_state.timer_started:
+            if st.session_state.timer_paused:
+                start_label = "▶️ 再開"
+            else:
+                start_disabled = True
+
+        with col1:
+            if st.button(start_label, key="start_timer", disabled=start_disabled):
+                if not st.session_state.timer_started:
+                    # 新規スタート
+                    st.session_state.timer_started = True
+                    st.session_state.timer_start_time = now.isoformat()
+                    st.session_state.timer_paused = False
+                    st.session_state.timer_pause_time = 0
+                    st.session_state.time_reached = False
+                    st.session_state.force_color_change = False
+                    save_current_settings(
+                        color_state=False,
+                        force_color=False,
+                        timer_started=True,
+                        timer_start_time=st.session_state.timer_start_time,
+                        timer_paused=False,
+                        timer_pause_time=0,
+                    )
+                    st.rerun()
+                elif st.session_state.timer_paused:
+                    # 一時停止からの再開：残り時間でリスタートする
+                    remaining = max(0, int(st.session_state.timer_pause_time))
+                    st.session_state.presentation_duration = remaining
+                    st.session_state.timer_paused = False
+                    st.session_state.timer_pause_time = 0
+                    st.session_state.timer_start_time = now.isoformat()
+                    save_current_settings(
+                        presentation_duration=remaining,
+                        timer_started=True,
+                        timer_start_time=st.session_state.timer_start_time,
+                        timer_paused=False,
+                        timer_pause_time=0,
+                    )
+                    st.rerun()
+
+        pause_disabled = not st.session_state.timer_started or st.session_state.timer_paused
+        with col2:
+            if st.button("⏸️ 一時停止", key="pause_timer", disabled=pause_disabled):
+                if st.session_state.timer_started and not st.session_state.timer_paused:
+                    current_remaining = max(0, remaining_seconds)
+                    st.session_state.timer_paused = True
+                    st.session_state.timer_pause_time = int(current_remaining)
+                    save_current_settings(
+                        timer_started=True,
+                        timer_paused=True,
+                        timer_pause_time=st.session_state.timer_pause_time,
+                    )
+                    st.rerun()
+
+        with col3:
+            if st.button("⏹️ リセット", key="reset_timer"):
+                st.session_state.timer_started = False
+                st.session_state.timer_start_time = ""
+                st.session_state.timer_paused = False
+                st.session_state.timer_pause_time = 0
+                st.session_state.time_reached = False
+                st.session_state.force_color_change = False
+                save_current_settings(
+                    color_state=False,
+                    force_color=False,
+                    timer_started=False,
+                    timer_start_time="",
+                    timer_paused=False,
+                    timer_pause_time=0,
+                )
+                st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -802,27 +885,68 @@ if st.session_state.editing:
 
     else:
         new_mode = "presentation"
-        # プレゼン時間入力（分:秒 または 分 / 秒）
-        duration_input = st.text_input(
-            "プレゼン時間",
-            value=f"{st.session_state.presentation_duration // 60}:{st.session_state.presentation_duration % 60:02d}",
-            placeholder="例: 15:00, 15, 1:30, 90",
-            help="分:秒形式または分のみで入力可能です"
+        new_presentation_setting_label = st.selectbox(
+            "設定方法",
+            ["プレゼン時間", "終了時刻"],
+            index=0 if st.session_state.presentation_setting_mode == "duration" else 1
+        )
+        new_presentation_setting_mode = (
+            "duration" if new_presentation_setting_label == "プレゼン時間" else "end_time"
         )
 
-        st.markdown(f"""
-        <div class="input-help">
-            入力例: 15:00 (15分), 15 (15分), 1:30 (1分30秒), 90 (90秒)
-        </div>
-        """, unsafe_allow_html=True)
+        parsed_duration = None
+        parsed_end_time = None
 
-        parsed_duration = parse_duration_input(duration_input)
-        if parsed_duration:
-            minutes = parsed_duration // 60
-            seconds = parsed_duration % 60
-            st.success(f"✅ 設定時間: {minutes}分{seconds}秒")
-        elif duration_input.strip():
-            st.warning("⚠️ 時間の形式が正しくありません")
+        if new_presentation_setting_mode == "duration":
+            duration_input = st.text_input(
+                "プレゼン時間",
+                value=f"{st.session_state.presentation_duration // 60}:{st.session_state.presentation_duration % 60:02d}",
+                placeholder="例: 15:00, 15, 1:30, 90",
+                help="分:秒形式または分のみで入力可能です"
+            )
+
+            st.markdown(f"""
+            <div class="input-help">
+                入力例: 15:00 (15分), 15 (15分), 1:30 (1分30秒), 90 (90秒)
+            </div>
+            """, unsafe_allow_html=True)
+
+            parsed_duration = parse_duration_input(duration_input)
+            if parsed_duration:
+                minutes = parsed_duration // 60
+                seconds = parsed_duration % 60
+                st.success(f"✅ 設定時間: {minutes}分{seconds}秒")
+            elif duration_input.strip():
+                st.warning("⚠️ 時間の形式が正しくありません")
+        else:
+            end_time_input = st.text_input(
+                "終了時刻",
+                value=format_time_value(st.session_state.presentation_end_time) or now.strftime('%H:%M'),
+                placeholder="例: 14:30, 1430, 930",
+                help="様々な形式で入力可能です"
+            )
+
+            st.markdown(f"""
+            <div class="input-help">
+                入力例: 14:30, 1430, 930, 9:30, 19
+            </div>
+            """, unsafe_allow_html=True)
+
+            parsed_end_time = parse_time_input(end_time_input)
+            if parsed_end_time:
+                preview_dt = build_presentation_end_datetime(parsed_end_time, now)
+                if preview_dt <= now:
+                    time_status = " (現在時刻を過ぎています - すぐ超過表示になります)"
+                else:
+                    preview_diff = preview_dt - now
+                    hours, remainder = divmod(int(preview_diff.total_seconds()), 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    time_status = (
+                        f" (残り {hours:02d}:{minutes:02d}:{seconds:02d} でカウントダウン開始)"
+                    )
+                st.success(f"✅ 認識された終了時刻: {parsed_end_time.strftime('%H:%M')}{time_status}")
+            elif end_time_input.strip():
+                st.warning("⚠️ 時刻の形式が正しくありません")
 
     col1, col2 = st.columns(2)
 
@@ -838,10 +962,13 @@ if st.session_state.editing:
                         auto_color_change = False
                         auto_force_change = False
 
-                    if save_settings(parsed_time, new_suffix, auto_color_change, auto_force_change,
-                                     new_mode, st.session_state.presentation_duration,
-                                     st.session_state.timer_started, st.session_state.timer_start_time,
-                                     st.session_state.timer_paused, st.session_state.timer_pause_time):
+                    if save_current_settings(
+                        target_time=parsed_time,
+                        suffix=new_suffix,
+                        color_state=auto_color_change,
+                        force_color=auto_force_change,
+                        timer_mode=new_mode,
+                    ):
                         st.session_state.target_time = parsed_time
                         st.session_state.suffix = new_suffix
                         st.session_state.timer_mode = new_mode
@@ -855,22 +982,69 @@ if st.session_state.editing:
                 else:
                     st.error("正しい時刻を入力してください")
             else:
-                if parsed_duration:
-                    if save_settings(st.session_state.target_time, st.session_state.suffix,
-                                     st.session_state.time_reached, st.session_state.force_color_change,
-                                     new_mode, parsed_duration,
-                                     st.session_state.timer_started, st.session_state.timer_start_time,
-                                     st.session_state.timer_paused, st.session_state.timer_pause_time):
-                        st.session_state.timer_mode = new_mode
-                        st.session_state.presentation_duration = parsed_duration
-                        st.session_state.editing = False
-                        st.success("設定を更新しました！")
-                        time.sleep(0.2)
-                        st.rerun()
+                if new_presentation_setting_mode == "duration":
+                    if parsed_duration:
+                        if save_current_settings(
+                            color_state=False,
+                            force_color=False,
+                            timer_mode=new_mode,
+                            presentation_duration=parsed_duration,
+                            timer_started=False,
+                            timer_start_time="",
+                            timer_paused=False,
+                            timer_pause_time=0,
+                            presentation_setting_mode="duration",
+                        ):
+                            st.session_state.timer_mode = new_mode
+                            st.session_state.presentation_setting_mode = "duration"
+                            st.session_state.presentation_duration = parsed_duration
+                            st.session_state.timer_started = False
+                            st.session_state.timer_start_time = ""
+                            st.session_state.timer_paused = False
+                            st.session_state.timer_pause_time = 0
+                            st.session_state.time_reached = False
+                            st.session_state.force_color_change = False
+                            st.session_state.editing = False
+                            st.success("設定を更新しました！")
+                            time.sleep(0.2)
+                            st.rerun()
+                        else:
+                            st.error("設定の保存に失敗しました")
                     else:
-                        st.error("設定の保存に失敗しました")
+                        st.error("正しい時間を入力してください")
                 else:
-                    st.error("正しい時間を入力してください")
+                    if parsed_end_time:
+                        end_dt = build_presentation_end_datetime(parsed_end_time, now)
+                        auto_color_change = end_dt <= now
+                        auto_force_change = auto_color_change
+                        if save_current_settings(
+                            color_state=auto_color_change,
+                            force_color=auto_force_change,
+                            timer_mode=new_mode,
+                            timer_started=True,
+                            timer_start_time="",
+                            timer_paused=False,
+                            timer_pause_time=0,
+                            presentation_setting_mode="end_time",
+                            presentation_end_time=parsed_end_time,
+                        ):
+                            st.session_state.timer_mode = new_mode
+                            st.session_state.presentation_setting_mode = "end_time"
+                            st.session_state.presentation_end_time = parsed_end_time
+                            st.session_state.timer_started = True
+                            st.session_state.timer_start_time = ""
+                            st.session_state.timer_paused = False
+                            st.session_state.timer_pause_time = 0
+                            st.session_state.time_reached = auto_color_change
+                            st.session_state.force_color_change = auto_force_change
+                            st.session_state.editing = False
+                            st.success("終了時刻を設定しました！")
+                            time.sleep(0.2)
+                            st.rerun()
+                        else:
+                            st.error("設定の保存に失敗しました")
+                    else:
+                        st.error("正しい終了時刻を入力してください")
 
     with col2:
         if st.button("キャンセル"):
@@ -893,10 +1067,7 @@ if st.session_state.timer_mode == "clock":
         new_color_state = not st.session_state.time_reached
         new_force_state = new_color_state
 
-        if save_settings(st.session_state.target_time, st.session_state.suffix, new_color_state, new_force_state,
-                         st.session_state.timer_mode, st.session_state.presentation_duration,
-                         st.session_state.timer_started, st.session_state.timer_start_time,
-                         st.session_state.timer_paused, st.session_state.timer_pause_time):
+        if save_current_settings(color_state=new_color_state, force_color=new_force_state):
             st.session_state.time_reached = new_color_state
             st.session_state.force_color_change = new_force_state
             st.session_state.last_timestamp = datetime.datetime.now().isoformat()
